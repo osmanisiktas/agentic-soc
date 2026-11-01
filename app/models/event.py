@@ -48,9 +48,17 @@ class NetworkInfo(BaseModel):
 
     source_ip: str | None = None
     source_port: int | None = Field(default=None, ge=1, le=65535)
+
     destination_ip: str | None = None
     destination_port: int | None = Field(default=None, ge=1, le=65535)
+
     protocol: str | None = None
+    direction: str | None = None
+    action: str | None = None
+    connection_state: str | None = None
+
+    bytes_sent: int | None = Field(default=None, ge=0)
+    bytes_received: int | None = Field(default=None, ge=0)
 
 
 class SecurityEvent(BaseModel):
