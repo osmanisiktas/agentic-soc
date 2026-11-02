@@ -10,3 +10,6 @@ __pycache__/
 .DS_Store
 data/events/*.jsonl
 data/alerts/*.jsonl
+# Python cache
+__pycache__/
+*.py[cod]
