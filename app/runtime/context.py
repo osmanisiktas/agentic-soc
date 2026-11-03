@@ -1,3 +1,4 @@
+from uuid import UUID
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -30,7 +31,7 @@ class AgentContext(BaseModel):
         frozen=True,
     )
 
-    task_id: str = Field(min_length=1, max_length=64)
+    task_id: UUID
     agent_id: str = Field(min_length=3, max_length=64)
     tenant_id: str = Field(min_length=2, max_length=64)
 
