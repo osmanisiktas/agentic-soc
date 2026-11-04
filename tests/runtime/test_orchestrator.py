@@ -354,3 +354,33 @@ def test_unknown_evidence_reference_is_rejected(identity, workflow):
     assert authorization.execution_events[-1].event_type == (
         AuditEventType.EXECUTION_FAILED
     )
+
+
+def test_orchestrator_rejects_cross_tenant_evidence(identity, workflow):
+    from app.runtime.context import EvidenceItem
+    from app.runtime.orchestrator import EvidenceValidationError
+
+    agent = MockAgent(identity)
+    authorization = MockAuthorizationService()
+    orchestrator = create_orchestrator(agent, authorization)
+
+    foreign_evidence = EvidenceItem(
+        evidence_id="evidence-tenant-b",
+        evidence_type="alert",
+        source="detection-engine",
+        tenant_id="tenant-b",
+        content={"alert_id": "456"},
+    )
+
+    with pytest.raises(EvidenceValidationError):
+        asyncio.run(
+            orchestrator.execute(
+                workflow=workflow,
+                requested_by="soc-operator",
+                evidence=(foreign_evidence,),
+            )
+        )
+
+    assert agent.run_count == 0
+    assert authorization.calls == 0
+    assert authorization.execution_events == []

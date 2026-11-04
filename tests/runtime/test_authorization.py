@@ -46,6 +46,7 @@ def authorization_setup(tmp_path):
                 evidence_id="evidence-001",
                 evidence_type="alert",
                 source="detection-engine",
+                tenant_id="tenant-a",
                 content={"alert_id": "123"},
             ),
         ),

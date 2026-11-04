@@ -35,6 +35,10 @@ class AgentResultValidationError(ValueError):
     """Raised when an agent returns an invalid or untrusted result."""
 
 
+class EvidenceValidationError(ValueError):
+    """Raised when evidence fails tenant or integrity validation."""
+
+
 @dataclass(frozen=True)
 class WorkflowExecutionResult:
     correlation_id: UUID
@@ -52,8 +56,8 @@ class Orchestrator:
     Trusted workflow execution coordinator.
 
     The orchestrator creates tasks and contexts, resolves trusted agents,
-    requests authorization, audits execution lifecycle events, and
-    validates agent results.
+    validates evidence, requests authorization, audits execution lifecycle
+    events, and validates agent results.
     """
 
     def __init__(
@@ -74,6 +78,11 @@ class Orchestrator:
     ) -> WorkflowExecutionResult:
         if not requested_by.strip():
             raise ValueError("A trusted requester identity is required.")
+
+        self._validate_evidence(
+            evidence=evidence,
+            tenant_id=workflow.tenant_id,
+        )
 
         correlation_id = uuid4()
         workflow_deadline = (
@@ -220,6 +229,7 @@ class Orchestrator:
                 reason_code="AGENT_EXECUTION_FAILED",
                 evidence_ids=evidence_ids,
             )
+
             if isinstance(exc, AgentResultValidationError):
                 raise
 
@@ -251,6 +261,25 @@ class Orchestrator:
             result=result,
             authorization_audit=authorization.audit_event,
         )
+
+    @staticmethod
+    def _validate_evidence(
+        *,
+        evidence: tuple[EvidenceItem, ...],
+        tenant_id: str,
+    ) -> None:
+        for item in evidence:
+            if item.tenant_id != tenant_id:
+                raise EvidenceValidationError(
+                    "Evidence tenant does not match workflow tenant."
+                )
+
+            try:
+                item.verify_integrity()
+            except (TypeError, ValueError) as exc:
+                raise EvidenceValidationError(
+                    "Evidence integrity validation failed."
+                ) from exc
 
     @staticmethod
     def _validate_result(
