@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
 
 from app.audit.models import AuditEvent
 from app.audit.service import AuditService
@@ -39,7 +38,6 @@ class AuthorizationService:
         context: AgentContext,
         required_capabilities: tuple[str, ...],
         required_resources: tuple[str, ...],
-        correlation_id: UUID,
         now: datetime | None = None,
     ) -> AuthorizationResult:
 
@@ -63,7 +61,7 @@ class AuthorizationService:
                 evidence_ids=tuple(
                     item.evidence_id for item in context.evidence
                 ),
-                correlation_id=correlation_id,
+                correlation_id=task.correlation_id,
             )
         except Exception as exc:
             raise AuthorizationAuditError(

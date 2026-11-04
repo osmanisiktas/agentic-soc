@@ -38,6 +38,7 @@ def authorization_setup(tmp_path):
 
     context = AgentContext(
         task_id=task.task_id,
+        correlation_id=task.correlation_id,
         agent_id="triage-agent",
         tenant_id="tenant-a",
         evidence=(
@@ -76,13 +77,13 @@ def test_authorized_decision_is_audited(authorization_setup):
         context=setup["context"],
         required_capabilities=("alert:read",),
         required_resources=("alerts:123",),
-        correlation_id=uuid4(),
         now=setup["now"],
     )
 
     assert result.decision.allowed is True
     assert result.decision.reason_code == "AUTHORIZED"
     assert result.audit_event.decision == AuditDecision.ALLOW
+    assert result.audit_event.correlation_id == setup["task"].correlation_id
     assert len(setup["storage"].read_all()) == 1
     assert setup["storage"].verify_chain() is True
 
@@ -96,13 +97,37 @@ def test_denied_decision_is_audited(authorization_setup):
         context=setup["context"],
         required_capabilities=("alert:delete",),
         required_resources=("alerts:123",),
-        correlation_id=uuid4(),
         now=setup["now"],
     )
 
     assert result.decision.allowed is False
     assert result.decision.reason_code == "CAPABILITY_DENIED"
     assert result.audit_event.decision == AuditDecision.DENY
+    assert result.audit_event.correlation_id == setup["task"].correlation_id
+    assert len(setup["storage"].read_all()) == 1
+    assert setup["storage"].verify_chain() is True
+
+
+def test_correlation_mismatch_is_denied_and_audited(authorization_setup):
+    setup = authorization_setup
+
+    mismatched_context = setup["context"].model_copy(
+        update={"correlation_id": uuid4()}
+    )
+
+    result = setup["authorization_service"].authorize(
+        identity=setup["identity"],
+        task=setup["task"],
+        context=mismatched_context,
+        required_capabilities=("alert:read",),
+        required_resources=("alerts:123",),
+        now=setup["now"],
+    )
+
+    assert result.decision.allowed is False
+    assert result.decision.reason_code == "CORRELATION_ID_MISMATCH"
+    assert result.audit_event.decision == AuditDecision.DENY
+    assert result.audit_event.correlation_id == setup["task"].correlation_id
     assert len(setup["storage"].read_all()) == 1
     assert setup["storage"].verify_chain() is True
 
@@ -126,6 +151,5 @@ def test_audit_failure_blocks_authorization(authorization_setup, monkeypatch):
             context=setup["context"],
             required_capabilities=("alert:read",),
             required_resources=("alerts:123",),
-            correlation_id=uuid4(),
             now=setup["now"],
         )

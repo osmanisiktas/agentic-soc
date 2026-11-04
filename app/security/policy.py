@@ -65,24 +65,28 @@ def evaluate_task(
     if task.task_id != context.task_id:
         return PolicyDecision(False, "TASK_CONTEXT_MISMATCH")
 
-    # 7. Verify task validity
+    # 7. Verify correlation binding
+    if task.correlation_id != context.correlation_id:
+        return PolicyDecision(False, "CORRELATION_ID_MISMATCH")
+
+    # 8. Verify task validity
     if task.created_at > current_time:
         return PolicyDecision(False, "TASK_NOT_YET_VALID")
 
     if task.expires_at <= current_time:
         return PolicyDecision(False, "TASK_EXPIRED")
 
-    # 8. Verify capabilities
+    # 9. Verify capabilities
     if not set(required_capabilities).issubset(
         set(identity.capabilities)
     ):
         return PolicyDecision(False, "CAPABILITY_DENIED")
 
-    # 9. Verify resource scope
+    # 10. Verify resource scope
     if not set(required_resources).issubset(
         set(task.resource_scope)
     ):
         return PolicyDecision(False, "RESOURCE_SCOPE_DENIED")
 
-    # 10. Explicit allow
+    # 11. Explicit allow
     return PolicyDecision(True, "AUTHORIZED")

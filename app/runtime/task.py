@@ -19,6 +19,7 @@ class AgentTask(BaseModel):
     )
 
     task_id: UUID = Field(default_factory=uuid4)
+    correlation_id: UUID = Field(default_factory=uuid4)
 
     agent_id: str = Field(
         min_length=3,
@@ -80,7 +81,7 @@ class AgentTask(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def validate_expiration(self):
+    def validate_expiration(self) -> "AgentTask":
         if self.expires_at <= self.created_at:
             raise ValueError("Task expiration must be after creation")
 
