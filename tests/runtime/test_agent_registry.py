@@ -29,9 +29,18 @@ def registered_agent():
     return MockAgent(identity)
 
 
+def create_agent(tenant_id: str) -> MockAgent:
+    identity = AgentIdentity(
+        agent_id="triage-agent",
+        agent_type="triage",
+        tenant_id=tenant_id,
+        capabilities=("alert:read",),
+    )
+    return MockAgent(identity)
+
+
 def test_register_and_resolve_agent(registered_agent):
     registry = AgentRegistry()
-
     registry.register(registered_agent)
 
     resolved = registry.resolve(
@@ -44,7 +53,6 @@ def test_register_and_resolve_agent(registered_agent):
 
 def test_duplicate_agent_registration_is_rejected(registered_agent):
     registry = AgentRegistry()
-
     registry.register(registered_agent)
 
     with pytest.raises(ValueError):
@@ -53,7 +61,6 @@ def test_duplicate_agent_registration_is_rejected(registered_agent):
 
 def test_cross_tenant_agent_resolution_is_rejected(registered_agent):
     registry = AgentRegistry()
-
     registry.register(registered_agent)
 
     with pytest.raises(AgentNotFoundError):
@@ -75,8 +82,33 @@ def test_unknown_agent_resolution_is_rejected():
 
 def test_registry_contains_registered_agent(registered_agent):
     registry = AgentRegistry()
-
     registry.register(registered_agent)
 
-    assert registry.contains("triage-agent") is True
-    assert registry.contains("unknown-agent") is False
+    assert registry.contains(
+        agent_id="triage-agent",
+        tenant_id="tenant-a",
+    ) is True
+
+    assert registry.contains(
+        agent_id="triage-agent",
+        tenant_id="tenant-b",
+    ) is False
+
+
+def test_same_agent_id_can_be_registered_for_different_tenants():
+    registry = AgentRegistry()
+    tenant_a_agent = create_agent("tenant-a")
+    tenant_b_agent = create_agent("tenant-b")
+
+    registry.register(tenant_a_agent)
+    registry.register(tenant_b_agent)
+
+    assert registry.resolve(
+        agent_id="triage-agent",
+        tenant_id="tenant-a",
+    ) is tenant_a_agent
+
+    assert registry.resolve(
+        agent_id="triage-agent",
+        tenant_id="tenant-b",
+    ) is tenant_b_agent

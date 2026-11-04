@@ -7,21 +7,22 @@ class AgentNotFoundError(LookupError):
 
 class AgentRegistry:
     """
-    Trusted in-memory registry for platform-managed agents.
+    Trusted tenant-scoped registry for platform-managed agents.
 
     Registration must only be performed by trusted platform components.
     """
 
     def __init__(self) -> None:
-        self._agents: dict[str, BaseAgent] = {}
+        self._agents: dict[tuple[str, str], BaseAgent] = {}
 
     def register(self, agent: BaseAgent) -> None:
-        agent_id = agent.identity.agent_id
+        identity = agent.identity
+        key = (identity.tenant_id, identity.agent_id)
 
-        if agent_id in self._agents:
-            raise ValueError(f"Agent is already registered: {agent_id}")
+        if key in self._agents:
+            raise ValueError("Agent is already registered for this tenant.")
 
-        self._agents[agent_id] = agent
+        self._agents[key] = agent
 
     def resolve(
         self,
@@ -29,14 +30,20 @@ class AgentRegistry:
         agent_id: str,
         tenant_id: str,
     ) -> BaseAgent:
-        agent = self._agents.get(agent_id)
+        key = (tenant_id, agent_id)
+        agent = self._agents.get(key)
 
-        if agent is None or agent.identity.tenant_id != tenant_id:
+        if agent is None:
             raise AgentNotFoundError(
                 "Agent is not available for the requested tenant."
             )
 
         return agent
 
-    def contains(self, agent_id: str) -> bool:
-        return agent_id in self._agents
+    def contains(
+        self,
+        *,
+        agent_id: str,
+        tenant_id: str,
+    ) -> bool:
+        return (tenant_id, agent_id) in self._agents
