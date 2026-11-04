@@ -23,6 +23,8 @@ class AgentResult(BaseModel):
 
     result_id: UUID = Field(default_factory=uuid4)
     task_id: UUID
+    correlation_id: UUID
+
     agent_id: str = Field(min_length=3, max_length=64)
     tenant_id: str = Field(min_length=2, max_length=64)
 
