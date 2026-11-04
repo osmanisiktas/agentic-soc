@@ -38,7 +38,7 @@ class AuditService:
             correlation_id=correlation_id,
         )
 
-        # Fail closed: audit kaydı yazılamazsa çağırana hata döner.
+        # Fail closed: propagate an error if the audit event cannot be persisted.
         self._storage.append(audit_event)
 
         return audit_event

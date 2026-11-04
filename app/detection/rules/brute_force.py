@@ -103,8 +103,8 @@ def detect_brute_force(
                     )
                 )
 
-                # İlk eşleşmede bir alarm üret. Aynı gruptaki
-                # sonraki event'ler için tekrar alarm oluşturma.
+                # Generate an alert on the first match. Do not generate
+                # additional alerts for subsequent events in the same group.
                 break
 
     return alerts

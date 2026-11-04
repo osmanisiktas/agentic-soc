@@ -28,7 +28,7 @@ def store_alert(alert: Alert) -> Alert:
 
     existing = load_alerts()
 
-    # Aynı kural ve aynı event grubu için mükerrer alarm oluşturma.
+    # Prevent duplicate alerts for the same rule and event group.
     for saved_alert in existing:
         if (
             saved_alert.rule_id == alert.rule_id
