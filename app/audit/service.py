@@ -1,6 +1,10 @@
 from uuid import UUID
 
-from app.audit.models import AuditDecision, AuditEvent
+from app.audit.models import (
+    AuditDecision,
+    AuditEvent,
+    AuditEventType,
+)
 from app.audit.storage import AuditStorage
 from app.security.policy import PolicyDecision
 
@@ -21,8 +25,8 @@ class AuditService:
         evidence_ids: tuple[str, ...] = (),
         correlation_id: UUID,
     ) -> AuditEvent:
-
         audit_event = AuditEvent(
+            event_type=AuditEventType.POLICY_DECISION,
             actor_id=actor_id,
             actor_type=actor_type,
             tenant_id=tenant_id,
@@ -38,7 +42,38 @@ class AuditService:
             correlation_id=correlation_id,
         )
 
-        # Fail closed: propagate an error if the audit event cannot be persisted.
         self._storage.append(audit_event)
+        return audit_event
 
+    def record_execution_event(
+        self,
+        *,
+        event_type: AuditEventType,
+        actor_id: str,
+        actor_type: str,
+        tenant_id: str,
+        task_id: UUID,
+        action: str,
+        reason_code: str,
+        correlation_id: UUID,
+        evidence_ids: tuple[str, ...] = (),
+    ) -> AuditEvent:
+        if event_type == AuditEventType.POLICY_DECISION:
+            raise ValueError(
+                "Use record_policy_decision for policy events."
+            )
+
+        audit_event = AuditEvent(
+            event_type=event_type,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            tenant_id=tenant_id,
+            task_id=task_id,
+            action=action,
+            reason_code=reason_code,
+            evidence_ids=evidence_ids,
+            correlation_id=correlation_id,
+        )
+
+        self._storage.append(audit_event)
         return audit_event

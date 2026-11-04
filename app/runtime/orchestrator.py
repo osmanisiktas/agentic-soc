@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from app.agents.registry import AgentRegistry, AgentNotFoundError
-from app.audit.models import AuditEvent
+from app.agents.registry import AgentRegistry
+from app.audit.models import AuditEvent, AuditEventType
 from app.runtime.authorization import (
     AuthorizationAuditError,
     AuthorizationService,
@@ -13,7 +13,6 @@ from app.runtime.context import AgentContext, EvidenceItem
 from app.runtime.result import AgentExecutionStatus, AgentResult
 from app.runtime.task import AgentTask
 from app.runtime.workflow import WorkflowDefinition
-from app.security.policy import PolicyDecision
 
 
 class WorkflowAuthorizationError(PermissionError):
@@ -53,7 +52,8 @@ class Orchestrator:
     Trusted workflow execution coordinator.
 
     The orchestrator creates tasks and contexts, resolves trusted agents,
-    requests authorization, and validates agent results.
+    requests authorization, audits execution lifecycle events, and
+    validates agent results.
     """
 
     def __init__(
@@ -84,7 +84,10 @@ class Orchestrator:
         results: list[AgentResult] = []
 
         for step in workflow.steps:
-            remaining = workflow_deadline - asyncio.get_running_loop().time()
+            remaining = (
+                workflow_deadline
+                - asyncio.get_running_loop().time()
+            )
 
             if remaining <= 0:
                 raise WorkflowTimeoutError(
@@ -93,7 +96,7 @@ class Orchestrator:
 
             timeout_seconds = min(
                 step.max_runtime_seconds,
-                max(1, int(remaining)),
+                remaining,
             )
 
             step_execution = await self._execute_step(
@@ -126,7 +129,7 @@ class Orchestrator:
         requested_by: str,
         correlation_id: UUID,
         evidence: tuple[EvidenceItem, ...],
-        timeout_seconds: int,
+        timeout_seconds: float,
     ) -> StepExecution:
         agent = self._registry.resolve(
             agent_id=step.agent_id,
@@ -145,7 +148,7 @@ class Orchestrator:
             resource_scope=step.required_resources,
             created_at=created_at,
             expires_at=created_at + timedelta(seconds=timeout_seconds),
-            max_runtime_seconds=timeout_seconds,
+            max_runtime_seconds=max(1, int(timeout_seconds)),
         )
 
         context = AgentContext(
@@ -170,25 +173,79 @@ class Orchestrator:
                 f"Workflow step denied: {authorization.decision.reason_code}"
             )
 
+        evidence_ids = tuple(
+            item.evidence_id for item in context.evidence
+        )
+
+        self._authorization_service.record_execution_event(
+            event_type=AuditEventType.EXECUTION_STARTED,
+            identity=identity,
+            task=task,
+            reason_code="EXECUTION_AUTHORIZED",
+            evidence_ids=evidence_ids,
+        )
+
         try:
             result = await asyncio.wait_for(
                 agent.run(task, context),
                 timeout=timeout_seconds,
             )
+
+            self._validate_result(
+                result=result,
+                task=task,
+                evidence=evidence,
+            )
+
         except asyncio.TimeoutError as exc:
+            self._authorization_service.record_execution_event(
+                event_type=AuditEventType.EXECUTION_TIMED_OUT,
+                identity=identity,
+                task=task,
+                reason_code="AGENT_EXECUTION_TIMEOUT",
+                evidence_ids=evidence_ids,
+            )
             raise AgentExecutionTimeoutError(
                 "Agent execution exceeded its time limit."
             ) from exc
+
+        except AuthorizationAuditError:
+            raise
+
         except Exception as exc:
+            self._authorization_service.record_execution_event(
+                event_type=AuditEventType.EXECUTION_FAILED,
+                identity=identity,
+                task=task,
+                reason_code="AGENT_EXECUTION_FAILED",
+                evidence_ids=evidence_ids,
+            )
+            if isinstance(exc, AgentResultValidationError):
+                raise
+
             raise AgentExecutionError(
                 "Agent execution failed."
             ) from exc
 
-        self._validate_result(
-            result=result,
-            task=task,
-            evidence=evidence,
-        )
+        if result.status in (
+            AgentExecutionStatus.FAILED,
+            AgentExecutionStatus.REJECTED,
+        ):
+            self._authorization_service.record_execution_event(
+                event_type=AuditEventType.EXECUTION_FAILED,
+                identity=identity,
+                task=task,
+                reason_code=f"AGENT_RESULT_{result.status.value.upper()}",
+                evidence_ids=evidence_ids,
+            )
+        else:
+            self._authorization_service.record_execution_event(
+                event_type=AuditEventType.EXECUTION_COMPLETED,
+                identity=identity,
+                task=task,
+                reason_code="EXECUTION_SUCCEEDED",
+                evidence_ids=evidence_ids,
+            )
 
         return StepExecution(
             result=result,

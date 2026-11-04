@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import UUID
 
-from app.audit.models import AuditEvent
+from app.audit.models import AuditEvent, AuditEventType
 from app.audit.service import AuditService
 from app.runtime.context import AgentContext
 from app.runtime.task import AgentTask
@@ -10,7 +11,7 @@ from app.security.policy import PolicyDecision, evaluate_task
 
 
 class AuthorizationAuditError(RuntimeError):
-    """Raised when an authorization decision cannot be audited."""
+    """Raised when an authorization or execution event cannot be audited."""
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,6 @@ class AuthorizationService:
         required_resources: tuple[str, ...],
         now: datetime | None = None,
     ) -> AuthorizationResult:
-
         decision = evaluate_task(
             identity=identity,
             task=task,
@@ -73,3 +73,29 @@ class AuthorizationService:
             decision=decision,
             audit_event=audit_event,
         )
+
+    def record_execution_event(
+        self,
+        *,
+        event_type: AuditEventType,
+        identity: AgentIdentity,
+        task: AgentTask,
+        reason_code: str,
+        evidence_ids: tuple[str, ...] = (),
+    ) -> AuditEvent:
+        try:
+            return self._audit_service.record_execution_event(
+                event_type=event_type,
+                actor_id=identity.agent_id,
+                actor_type=identity.agent_type,
+                tenant_id=identity.tenant_id,
+                task_id=task.task_id,
+                action=task.task_type,
+                reason_code=reason_code,
+                correlation_id=task.correlation_id,
+                evidence_ids=evidence_ids,
+            )
+        except Exception as exc:
+            raise AuthorizationAuditError(
+                "Execution lifecycle event could not be persisted."
+            ) from exc

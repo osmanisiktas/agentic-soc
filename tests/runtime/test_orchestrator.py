@@ -5,7 +5,7 @@ import pytest
 
 from app.agents.base import BaseAgent
 from app.agents.registry import AgentRegistry
-from app.audit.models import AuditDecision, AuditEvent
+from app.audit.models import AuditDecision, AuditEvent, AuditEventType
 from app.runtime.authorization import AuthorizationResult
 from app.runtime.context import AgentContext
 from app.runtime.orchestrator import (
@@ -57,6 +57,7 @@ class MockAuthorizationService:
     def __init__(self, allowed=True):
         self.allowed = allowed
         self.calls = 0
+        self.execution_events = []
 
     def authorize(
         self,
@@ -93,6 +94,29 @@ class MockAuthorizationService:
             decision=decision,
             audit_event=audit_event,
         )
+
+    def record_execution_event(
+        self,
+        *,
+        event_type,
+        identity,
+        task,
+        reason_code,
+        evidence_ids=(),
+    ):
+        event = AuditEvent(
+            event_type=event_type,
+            actor_id=identity.agent_id,
+            actor_type=identity.agent_type,
+            tenant_id=identity.tenant_id,
+            task_id=task.task_id,
+            action=task.task_type,
+            reason_code=reason_code,
+            evidence_ids=evidence_ids,
+            correlation_id=task.correlation_id,
+        )
+        self.execution_events.append(event)
+        return event
 
 
 @pytest.fixture
@@ -151,6 +175,12 @@ def test_authorized_workflow_executes_agent(identity, workflow):
     assert execution.results[0].status == AgentExecutionStatus.SUCCESS
     assert agent.run_count == 1
     assert authorization.calls == 1
+    assert [
+        event.event_type for event in authorization.execution_events
+    ] == [
+        AuditEventType.EXECUTION_STARTED,
+        AuditEventType.EXECUTION_COMPLETED,
+    ]
 
 
 def test_correlation_id_is_propagated(identity, workflow):
@@ -189,6 +219,7 @@ def test_denied_workflow_does_not_execute_agent(identity, workflow):
 
     assert agent.run_count == 0
     assert authorization.calls == 1
+    assert authorization.execution_events == []
 
 
 def test_mismatched_result_identity_is_rejected(identity, workflow):
@@ -204,10 +235,8 @@ def test_mismatched_result_identity_is_rejected(identity, workflow):
         )
 
     agent = MockAgent(identity, behavior=invalid_behavior)
-    orchestrator = create_orchestrator(
-        agent,
-        MockAuthorizationService(),
-    )
+    authorization = MockAuthorizationService()
+    orchestrator = create_orchestrator(agent, authorization)
 
     with pytest.raises(AgentResultValidationError):
         asyncio.run(
@@ -216,6 +245,13 @@ def test_mismatched_result_identity_is_rejected(identity, workflow):
                 requested_by="soc-operator",
             )
         )
+
+    assert [
+        event.event_type for event in authorization.execution_events
+    ] == [
+        AuditEventType.EXECUTION_STARTED,
+        AuditEventType.EXECUTION_FAILED,
+    ]
 
 
 def test_agent_timeout_is_enforced(identity):
@@ -247,10 +283,8 @@ def test_agent_timeout_is_enforced(identity):
         steps=(step,),
         max_runtime_seconds=10,
     )
-    orchestrator = create_orchestrator(
-        agent,
-        MockAuthorizationService(),
-    )
+    authorization = MockAuthorizationService()
+    orchestrator = create_orchestrator(agent, authorization)
 
     with pytest.raises(AgentExecutionTimeoutError):
         asyncio.run(
@@ -260,16 +294,21 @@ def test_agent_timeout_is_enforced(identity):
             )
         )
 
+    assert [
+        event.event_type for event in authorization.execution_events
+    ] == [
+        AuditEventType.EXECUTION_STARTED,
+        AuditEventType.EXECUTION_TIMED_OUT,
+    ]
+
 
 def test_agent_exception_is_wrapped(identity, workflow):
     async def failing_behavior(task, context):
         raise RuntimeError("Internal agent failure")
 
     agent = MockAgent(identity, behavior=failing_behavior)
-    orchestrator = create_orchestrator(
-        agent,
-        MockAuthorizationService(),
-    )
+    authorization = MockAuthorizationService()
+    orchestrator = create_orchestrator(agent, authorization)
 
     with pytest.raises(AgentExecutionError):
         asyncio.run(
@@ -278,6 +317,13 @@ def test_agent_exception_is_wrapped(identity, workflow):
                 requested_by="soc-operator",
             )
         )
+
+    assert [
+        event.event_type for event in authorization.execution_events
+    ] == [
+        AuditEventType.EXECUTION_STARTED,
+        AuditEventType.EXECUTION_FAILED,
+    ]
 
 
 def test_unknown_evidence_reference_is_rejected(identity, workflow):
@@ -294,10 +340,8 @@ def test_unknown_evidence_reference_is_rejected(identity, workflow):
         )
 
     agent = MockAgent(identity, behavior=invalid_evidence_behavior)
-    orchestrator = create_orchestrator(
-        agent,
-        MockAuthorizationService(),
-    )
+    authorization = MockAuthorizationService()
+    orchestrator = create_orchestrator(agent, authorization)
 
     with pytest.raises(AgentResultValidationError):
         asyncio.run(
@@ -306,3 +350,7 @@ def test_unknown_evidence_reference_is_rejected(identity, workflow):
                 requested_by="soc-operator",
             )
         )
+
+    assert authorization.execution_events[-1].event_type == (
+        AuditEventType.EXECUTION_FAILED
+    )
